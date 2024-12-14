@@ -31,6 +31,7 @@ ModelName = Literal[
     "EQTransformer",
     "OBSTransformer",
     "LFEDetect",
+    "GPD",
 ]
 
 
@@ -271,6 +272,8 @@ class SeisBench(ImageFunction):
             )
 
     def get_blinding_samples(self) -> tuple[int, int]:
+        if self.model == "GPD":
+            return (0, 0)
         try:
             return self.seisbench_model.default_args["blinding"]
         except KeyError:
