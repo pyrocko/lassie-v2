@@ -9,6 +9,7 @@ from lru import LRU
 from pydantic import BaseModel, ByteSize, Field, PositiveFloat, PrivateAttr
 
 from qseek.octree import get_node_coordinates
+from qseek.utils import alog_call
 
 if TYPE_CHECKING:
     from qseek.models.station import Station, Stations
@@ -36,6 +37,10 @@ class DistanceWeights(BaseModel):
         le=1.0,
         description="Waterlevel for the exponential decay function. Default is 0.0.",
     )
+    normalize: bool = Field(
+        default=True,
+        description="Normalize the weights to the range [0, 1]. Default is True.",
+    )
     lut_cache_size: ByteSize = Field(
         default=200 * MB,
         description="Size of the LRU cache in bytes. Default is 200 MB.",
@@ -61,9 +66,12 @@ class DistanceWeights(BaseModel):
     def calc_weights(self, distances: np.ndarray) -> np.ndarray:
         exp = self.exponent
         radius = self.radius_meters
-        return (1 - self.waterlevel) / (
+        weights = (1 - self.waterlevel) / (
             1 + (distances / radius) ** exp
         ) + self.waterlevel
+        if self.normalize:
+            weights /= weights.max()
+        return weights
 
     def prepare(self, stations: Stations, octree: Octree) -> None:
         logger.info("preparing distance weights")
@@ -107,6 +115,7 @@ class DistanceWeights(BaseModel):
         """Return the fill level of the LUT as a float between 0.0 and 1.0."""
         return len(self._node_lut) / self._node_lut.get_size()
 
+    @alog_call
     async def get_weights(
         self, nodes: Sequence[Node], stations: Stations
     ) -> np.ndarray:

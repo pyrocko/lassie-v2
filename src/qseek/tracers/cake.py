@@ -38,6 +38,7 @@ from qseek.tracers.base import ModelledArrival, RayTracer
 from qseek.utils import (
     CACHE_DIR,
     PhaseDescription,
+    alog_call,
     datetime_now,
     human_readable_bytes,
 )
@@ -658,6 +659,7 @@ class CakeTracer(RayTracer):
             raise ValueError(f"Phase {phase} is not defined.") from exc
         return tree.get_travel_time(source, receiver)
 
+    @alog_call
     async def get_travel_times(
         self,
         phase: str,

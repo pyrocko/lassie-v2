@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Iterator
 
 import aiofiles
+import numpy as np
 from pydantic import BaseModel, PrivateAttr, ValidationError, computed_field
 from pyrocko import io
 from pyrocko.gui import marker
@@ -164,14 +166,19 @@ class EventCatalog(BaseModel):
         # This has to happen after the markers are saved, cache is cleared
         await detection.save(self.rundir, jitter_location=jitter_location)
 
-    def save_semblance_trace(self, trace: Trace) -> None:
+    async def save_semblance_trace(self, trace: Trace) -> None:
         """Add semblance trace to detection and save to file.
+
+        Data is multiplied by 1e3 and saved as int32 to leverage
+        MiniSEED STEIM compression.
 
         Args:
             trace (Trace): semblance trace.
         """
         trace.set_station("SEMBL")
-        io.save(
+        trace.set_ydata((trace.ydata * 1e3).astype(np.int32))
+        await asyncio.to_thread(
+            io.save,
             trace,
             str(self.rundir / "semblance.mseed"),
             append=True,

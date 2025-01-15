@@ -31,6 +31,7 @@ ModelName = Literal[
     "EQTransformer",
     "OBSTransformer",
     "LFEDetect",
+    "GPD",
 ]
 
 
@@ -271,6 +272,8 @@ class SeisBench(ImageFunction):
             )
 
     def get_blinding_samples(self) -> tuple[int, int]:
+        if self.model == "GPD":
+            return (0, 0)
         try:
             return self.seisbench_model.default_args["blinding"]
         except KeyError:
@@ -335,6 +338,9 @@ class SeisBench(ImageFunction):
             detection_half_width=self._detection_half_width(),
             traces=[tr for tr in annotated_traces if tr.channel.endswith("S")],
         )
+
+        for tr in annotation_s.traces + annotation_p.traces:
+            tr.set_channel(tr.channel[-1])
 
         return [annotation_s, annotation_p]
 

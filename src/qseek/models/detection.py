@@ -366,7 +366,6 @@ class EventReceivers(BaseModel):
         quantity: MeasurementUnit = "velocity",
         demean: bool = True,
         filter_clipped: bool = False,
-        freqlimits: tuple[float, float, float, float] = (0.01, 0.1, 25.0, 35.0),
         receivers: Iterable[Receiver] | None = None,
     ) -> list[Trace]:
         """Retrieves and restitutes waveforms for a given squirrel.
@@ -388,8 +387,6 @@ class EventReceivers(BaseModel):
             demean (bool, optional): Whether to demean the waveforms. Defaults to True.
             remove_clipped (bool, optional): Whether to remove clipped traces.
                 Defaults to False.
-            freqlimits (tuple[float, float, float, float], optional):
-                The frequency limits. Defaults to (0.01, 0.1, 25.0, 35.0).
             receivers (list[Receiver] | None, optional): The receivers to retrieve
                 waveforms for. If None, all receivers are retrieved. Defaults to None.
             filter_clipped (bool, optional): Whether to filter clipped traces.
@@ -436,7 +433,7 @@ class EventReceivers(BaseModel):
                 await asyncio.to_thread(
                     tr.transfer,
                     transfer_function=response.get_effective(input_quantity=quantity),
-                    freqlimits=freqlimits,
+                    freqlimits=(0.005, 0.05, 0.45 / tr.deltat, 0.5 / tr.deltat),
                     tfade=seconds_fade,
                     cut_off_fading=cut_off_fade,
                     demean=demean,

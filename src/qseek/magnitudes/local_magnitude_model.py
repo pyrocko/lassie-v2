@@ -114,6 +114,10 @@ class LocalMagnitudeModel:
     doi: ClassVar[str] = "Unknown"
     component: ClassVar[Component] = "vertical"
 
+    # Used only for non-Wood-Anderson models
+    highpass: ClassVar[float | None] = None
+    lowpass: ClassVar[float | None] = None
+
     @classmethod
     def get_subclass_by_name(cls, name: str) -> Type[LocalMagnitudeModel]:
         subclasses = {sub.model_name(): sub for sub in cls.__subclasses__()}
@@ -211,6 +215,8 @@ class WebnetWesternBohemia(LocalMagnitudeModel):
     component = "horizontal-abs"
     max_amplitude = "velocity"
 
+    highpass = 1.0
+
     def get_magnitude(
         self,
         amplitude: float,
@@ -253,9 +259,25 @@ class SouthernCalifornia(WoodAnderson, LocalMagnitudeModel):
     hypocentral_range = Range(10.0 * KM, 700.0 * KM)
     component = "north-east-separate"
 
+    max_amplitude = "wood-anderson-old"
+
     @staticmethod
     def get_amp_attenuation(dist_hypo_km: float, dist_epi_km: float) -> float:
         return 1.11 * np.log10(dist_hypo_km / 100) + 0.00189 * (dist_hypo_km - 100) + 3
+
+
+class CentralCalifornia(WoodAnderson, LocalMagnitudeModel):
+    author = "Bakun and Joyner (1984)"
+    doi = "10.1785/BSSA0740051827"
+
+    epicentral_range = Range(0.0 * KM, 400.0 * KM)
+    component = "horizontal-avg"
+
+    max_amplitude = "wood-anderson-old"
+
+    @staticmethod
+    def get_amp_attenuation(dist_hypo_km: float, dist_epi_km: float) -> float:
+        return np.log10(dist_hypo_km) + 0.00301 * dist_hypo_km + 0.7
 
 
 class IaspeiSouthernCalifornia(WoodAnderson, LocalMagnitudeModel):

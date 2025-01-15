@@ -346,7 +346,7 @@ class Semblance:
             station="semblance",
             tmin=start_time.timestamp(),
             deltat=1.0 / self.sampling_rate,
-            ydata=data.astype(np.float32, copy=False),
+            ydata=data,
         )
 
     def _clear_cache(self) -> None:

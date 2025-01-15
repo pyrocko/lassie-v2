@@ -198,6 +198,9 @@ class Stations(BaseModel):
                     )
                     self.stations.remove(sta)
 
+        if not self.stations:
+            raise ValueError("no stations available, add stations to start detection")
+
     def __iter__(self) -> Iterator[Station]:
         blacklist_pretty = {nsl.pretty for nsl in self.blacklist}
         return (sta for sta in self.stations if sta.nsl.pretty not in blacklist_pretty)

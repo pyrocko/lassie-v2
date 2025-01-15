@@ -42,6 +42,11 @@ PYTHON_VERSION = (sys.version_info.major, sys.version_info.minor)
 logger = logging.getLogger(__name__)
 FORMAT = "%(message)s"
 
+SDS_PYROCKO_SCHEME = (
+    "%(tmin_year)s/%(network)s/%(station)s/%(channel)s.D"
+    "/%(network)s.%(station)s.%(location)s.%(channel)s.D"
+    ".%(tmin_year)s.%(julianday)s"
+)
 
 PhaseDescription = Annotated[str, constr(pattern=r"[a-zA-Z]*:[a-zA-Z]*")]
 
@@ -380,8 +385,11 @@ def log_call(func: Callable[P, T]) -> Callable[P, T]:
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
         start = time.time()
         ret = func(*args, **kwargs)
-        duration = timedelta(seconds=time.time() - start)
-        logger.debug("executed %s in %s", func.__qualname__, duration)
+        logger.debug(
+            "executed %s in %s",
+            func.__qualname__,
+            timedelta(seconds=time.time() - start),
+        )
         return ret
 
     return wrapper
@@ -392,8 +400,11 @@ def alog_call(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
         start = time.time()
         ret = await func(*args, **kwargs)
-        duration = timedelta(seconds=time.time() - start)
-        logger.debug("executed %s in %s", func.__qualname__, duration)
+        logger.debug(
+            "executed %s in %s",
+            func.__qualname__,
+            timedelta(seconds=time.time() - start),
+        )
         return ret
 
     return wrapper
