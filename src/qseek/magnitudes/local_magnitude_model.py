@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple, Type
 import numpy as np
 from pyrocko.trace import PoleZeroResponse
 
-from qseek.magnitudes.base import StationAmplitudes
+from qseek.magnitudes.base import PeakMeasurement, StationAmplitudes
 from qseek.utils import NSL, ChannelSelector, ChannelSelectors, MeasurementUnit
 
 if TYPE_CHECKING:
@@ -24,32 +24,33 @@ M2NM = 1e9
 
 Component = Literal[
     "all",
+    "all-abs",
     "horizontal-abs",
     "horizontal-avg",
     "vertical",
     "north-east-separate",
 ]
 
-MaxAmplitudeType = Literal[
+MaxAmplitudeQuantity = Literal[
     "acceleration",
     "velocity",
     "displacement",
     "wood-anderson",
     "wood-anderson-old",
 ]
-
 # All models from Bormann (2012) https://doi.org/10.2312/GFZ.NMSOP-2_DS_3.1
 # Page 5
 
 _COMPONENT_MAP: dict[Component, ChannelSelector] = {
     "all": ChannelSelectors.All,
+    "all-abs": ChannelSelectors.AllAbsolute,
     "horizontal-abs": ChannelSelectors.HorizontalAbs,
     "horizontal-avg": ChannelSelectors.HorizontalAvg,
     "vertical": ChannelSelectors.Vertical,
     "north-east-separate": ChannelSelectors.NorthEast,
 }
 
-_QUANTITY_MAP: dict[MaxAmplitudeType, MeasurementUnit] = {
+_QUANTITY_MAP: dict[MaxAmplitudeQuantity, MeasurementUnit] = {
     "acceleration": "acceleration",
     "velocity": "velocity",
     "displacement": "displacement",
@@ -108,11 +109,16 @@ class LocalMagnitudeModel:
     epicentral_range: ClassVar[Range | None] = None
     hypocentral_range: ClassVar[Range | None] = None
 
-    max_amplitude: ClassVar[MaxAmplitudeType] = "wood-anderson"
+    max_amplitude: ClassVar[MaxAmplitudeQuantity] = "wood-anderson"
 
     author: ClassVar[str] = "Unknown"
-    doi: ClassVar[str] = "Unknown"
+    doi: ClassVar[str] = ""
     component: ClassVar[Component] = "vertical"
+    peak_measurement: ClassVar[PeakMeasurement] = "peak-to-peak"
+
+    # Used only for non-Wood-Anderson models
+    highpass_freq: ClassVar[float | None] = None
+    lowpass_freq: ClassVar[float | None] = None
 
     @classmethod
     def get_subclass_by_name(cls, name: str) -> Type[LocalMagnitudeModel]:
@@ -144,6 +150,7 @@ class LocalMagnitudeModel:
         event: EventDetection,
         receiver: Receiver,
         traces: list[Trace],
+        min_snr: float = 3.0,
     ) -> StationLocalMagnitude | None:
         """Calculate the local magnitude for a given event and receiver.
 
@@ -151,6 +158,8 @@ class LocalMagnitudeModel:
             event (EventDetection): The event to calculate the magnitude for.
             receiver (Receiver): The seismic station to calculate the magnitude for.
             traces (list[Trace]): The traces to calculate the magnitude for.
+            min_snr (float, optional): The minimum amplitude to noise ratio.
+                Defaults to 3.0.
 
         Returns:
             StationMagnitude | None: The calculated magnitude or None if the magnitude.
@@ -172,8 +181,13 @@ class LocalMagnitudeModel:
         if not traces:
             return None
 
-        sta = StationAmplitudes.create(receiver=receiver, traces=traces, event=event)
-        if sta.anr < 1.0:
+        sta = StationAmplitudes.create(
+            receiver=receiver,
+            traces=traces,
+            event=event,
+            measurement=self.peak_measurement,
+        )
+        if sta.snr < min_snr:
             return None
 
         with np.errstate(divide="ignore"):
@@ -208,8 +222,11 @@ class WebnetWesternBohemia(LocalMagnitudeModel):
     doi = "10.1023/A:1022198406514"
 
     hypocentral_range = Range(0.0 * KM, 100.0 * KM)
-    component = "horizontal-abs"
+    component = "all-abs"
     max_amplitude = "velocity"
+
+    peak_measurement = "max-amplitude"
+    highpass_freq = 1.0
 
     def get_magnitude(
         self,
@@ -217,21 +234,20 @@ class WebnetWesternBohemia(LocalMagnitudeModel):
         distance_hypo: float,
         distance_epi: float,
     ) -> float:
-        amplitude = amplitude * UM
         return (
-            np.log10(amplitude)
-            - np.log10(2 * np.pi)
+            np.log10(amplitude * UM)
+            - np.log10(np.pi)
             + 2.1 * np.log10(distance_hypo / KM)
             - 1.7
         )
 
 
 class WoodAnderson:
-    max_amplitude: ClassVar[MaxAmplitudeType] = "wood-anderson"
+    max_amplitude: ClassVar[MaxAmplitudeQuantity] = "wood-anderson"
 
     @staticmethod
     def get_amp_attenuation(dist_hypo_km: float, dist_epi_km: float) -> float:
-        """Get the amplitude attenuation for a given distance, known as -log10(A0)."""
+        """Get the amplitude attenuation for a given distance, the `-log10(A_0)`term."""
         raise NotImplementedError
 
     def get_magnitude(
@@ -252,6 +268,7 @@ class SouthernCalifornia(WoodAnderson, LocalMagnitudeModel):
 
     hypocentral_range = Range(10.0 * KM, 700.0 * KM)
     component = "north-east-separate"
+    max_amplitude = "wood-anderson-old"
 
     @staticmethod
     def get_amp_attenuation(dist_hypo_km: float, dist_epi_km: float) -> float:
@@ -260,13 +277,15 @@ class SouthernCalifornia(WoodAnderson, LocalMagnitudeModel):
 
 class CentralCalifornia(WoodAnderson, LocalMagnitudeModel):
     author = "Bakun and Joyner (1984)"
+    doi = "10.1785/BSSA0740051827"
 
     epicentral_range = Range(0.0 * KM, 400.0 * KM)
-    component = "north-east-separate"
+    component = "horizontal-avg"
+    max_amplitude = "wood-anderson-old"
 
     @staticmethod
     def get_amp_attenuation(dist_hypo_km: float, dist_epi_km: float) -> float:
-        return np.log10(dist_epi_km / 100) + 0.00301 * (dist_epi_km - 100) + 3.0
+        return np.log10(dist_hypo_km) + 0.00301 * dist_hypo_km + 0.7
 
 
 class IaspeiSouthernCalifornia(WoodAnderson, LocalMagnitudeModel):
@@ -274,6 +293,7 @@ class IaspeiSouthernCalifornia(WoodAnderson, LocalMagnitudeModel):
 
     hypocentral_range = Range(10.0 * KM, 700.0 * KM)
     component = "north-east-separate"
+    max_amplitude = "wood-anderson-old"
 
     def get_magnitude(
         self, amplitude: float, distance_hypo: float, distance_epi: float

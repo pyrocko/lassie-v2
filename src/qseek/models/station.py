@@ -5,7 +5,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Iterator
 
 import numpy as np
-from pydantic import BaseModel, DirectoryPath, Field, FilePath, PositiveFloat
+from pydantic import (
+    BaseModel,
+    DirectoryPath,
+    Field,
+    FilePath,
+    GetCoreSchemaHandler,
+    PositiveFloat,
+)
+from pydantic_core import CoreSchema, core_schema
 from pyrocko.io.stationxml import load_xml
 from pyrocko.model import Station as PyrockoStation
 from pyrocko.model import dump_stations_yaml, load_stations
@@ -21,6 +29,17 @@ if TYPE_CHECKING:
 from qseek.models.location import CoordSystem, Location
 
 logger = logging.getLogger(__name__)
+
+
+class Blacklist(set[NSL]):
+    def __contains__(self, other: NSL) -> bool:
+        return any(nsl.match(other) for nsl in self)
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(cls, handler(set[NSL]))
 
 
 class Station(Location):
@@ -84,8 +103,8 @@ class Stations(BaseModel):
         "directories containing StationXML (.xml) files.",
     )
 
-    blacklist: set[NSL] = Field(
-        default=set(),
+    blacklist: Blacklist = Field(
+        default=Blacklist(),
         description="Blacklist stations and exclude from detecion. "
         "Format is `['NET.STA.LOC', ...]`.",
     )
@@ -202,8 +221,7 @@ class Stations(BaseModel):
             raise ValueError("no stations available, add stations to start detection")
 
     def __iter__(self) -> Iterator[Station]:
-        blacklist_pretty = {nsl.pretty for nsl in self.blacklist}
-        return (sta for sta in self.stations if sta.nsl.pretty not in blacklist_pretty)
+        return (sta for sta in self.stations if sta.nsl not in self.blacklist)
 
     def mean_interstation_distance(self) -> float:
         """Calculate the mean interstation distance.

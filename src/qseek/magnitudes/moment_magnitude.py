@@ -165,7 +165,8 @@ class MomentMagnitude(EventMagnitude):
         event: EventDetection,
         receivers: list[Receiver],
         traces: list[list[Trace]],
-        noise_padding: float = 0.0,
+        noise_padding: float = 0.5,
+        min_snr: float = 3.0,
     ) -> None:
         for receiver, rcv_traces in zip(receivers, traces, strict=False):
             try:
@@ -181,10 +182,13 @@ class MomentMagnitude(EventMagnitude):
                 traces=rcv_traces,
                 noise_padding=noise_padding,
                 event=event,
+                measurement="max-amplitude",
             )
 
-            if station.anr < 1.0:
-                logger.warning("Station %s has bad ANR", receiver.nsl.pretty)
+            if station.snr < min_snr:
+                logger.debug(
+                    "Station %s has bad ANR %g", receiver.nsl.pretty, station.snr
+                )
                 continue
             if station.distance_epi > store.max_distance:
                 continue
@@ -239,7 +243,9 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
 
     seconds_before: PositiveFloat = Field(
         default=2.0,
-        description="Waveforms to extract before P phase arrival.",
+        ge=1.0,
+        description="Waveforms to extract before P phase arrival. The noise amplitude "
+        "is extracted from before the P phase arrival, with a one second padding.",
     )
     seconds_after: PositiveFloat = Field(
         default=4.0,
@@ -250,6 +256,13 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
         description="Seconds tapering before and after the extraction window."
         " The taper stabalizes the restitution and is cut off from the traces "
         "before the analysis.",
+    )
+    min_signal_noise_ratio: float = Field(
+        default=3.0,
+        ge=1.0,
+        description="Minimum signal-to-noise ratio for the magnitude estimation. "
+        "The noise amplitude is extracted from before the P phase arrival,"
+        " with 0.5 s padding.",
     )
 
     gf_store_dirs: list[DirectoryPath] = Field(
@@ -367,6 +380,7 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
                 receivers=receivers,
                 traces=grouped_traces,
                 peak_amplitude=definition.peak_amplitude,
+                min_snr=self.min_signal_noise_ratio,
             )
 
         if not moment_magnitude.average:

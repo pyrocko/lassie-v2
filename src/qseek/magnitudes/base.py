@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 KM = 1e3
 
+PeakMeasurement = Literal["peak-to-peak", "max-amplitude"]
+
 
 class EventMagnitude(BaseModel):
     magnitude: Literal["EventMagnitude"] = "EventMagnitude"
@@ -164,8 +166,8 @@ class StationAmplitudes(NamedTuple):
     distance_hypo: float
 
     @property
-    def anr(self) -> float:
-        """Amplitude to noise ratio."""
+    def snr(self) -> float:
+        """Signal-to-noise ratio."""
         if self.noise == 0.0:
             return 0.0
         return self.peak / self.noise
@@ -176,7 +178,8 @@ class StationAmplitudes(NamedTuple):
         receiver: Receiver,
         traces: list[Trace],
         event: EventDetection,
-        noise_padding: float = 0.0,
+        noise_padding: float = 0.5,
+        measurement: PeakMeasurement = "max-amplitude",
     ) -> Self:
         time_arrival = min(receiver.get_arrivals_time_window()).timestamp()
 
@@ -185,8 +188,14 @@ class StationAmplitudes(NamedTuple):
             for tr in traces
         ]
 
-        peak_amp = max(np.abs(tr.ydata).max() for tr in traces)
-        noise_amp = max(np.abs(tr.ydata).max() for tr in noise_traces)
+        if measurement == "peak-to-peak":
+            peak_amp = max(np.ptp(tr.ydata) / 2 for tr in traces)
+            noise_amp = max(np.ptp(tr.ydata) / 2 for tr in noise_traces)
+        elif measurement == "max-amplitude":
+            peak_amp = max(np.max(np.abs(tr.ydata)) for tr in traces)
+            noise_amp = max(np.max(np.abs(tr.ydata)) for tr in noise_traces)
+        else:
+            raise ValueError(f"Invalid measurement: {measurement}")
         std_noise = max(np.std(tr.ydata) for tr in noise_traces)
 
         return cls(

@@ -59,6 +59,7 @@ class LocalMagnitude(EventMagnitude):
         event: EventDetection,
         receivers: list[Receiver],
         grouped_traces: list[list[Trace]],
+        min_snr: float = 3.0,
     ) -> Self:
         self = cls(model=model.model_name())
 
@@ -67,10 +68,14 @@ class LocalMagnitude(EventMagnitude):
                 event=event,
                 traces=traces,
                 receiver=receiver,
+                min_snr=min_snr,
             )
             if station_magnitude is None:
                 continue
             self.station_magnitudes.append(station_magnitude)
+
+        if not self.station_magnitudes:
+            return self
 
         median = np.median(self.magnitudes)
         self.average = float(median)
@@ -142,7 +147,9 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
 
     seconds_before: PositiveFloat = Field(
         default=2.0,
-        description="Waveforms to extract before P phase arrival.",
+        ge=1.0,
+        description="Waveforms to extract before P phase arrival. The noise amplitude "
+        "is extracted from before the P phase arrival, with 0.5 s padding.",
     )
     seconds_after: PositiveFloat = Field(
         default=4.0,
@@ -154,6 +161,14 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
         " The taper stabalizes the restitution and is cut off from the traces "
         "before the analysis.",
     )
+    min_signal_noise_ratio: float = Field(
+        default=1.5,
+        ge=1.0,
+        description="Minimum signal-to-noise ratio for the local magnitude estimation. "
+        "The noise amplitude is extracted from before the P phase arrival,"
+        " with 0.5 s padding.",
+    )
+
     model: ModelName = Field(
         default="iaspei-southern-california",
         description="The estimator to use for calculating the local magnitude.",
@@ -175,18 +190,13 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
     async def add_magnitude(self, squirrel: Squirrel, event: EventDetection) -> None:
         model = self._model
 
-        cut_off_fade = model.max_amplitude not in (
-            "wood-anderson",
-            "wood-anderson-old",
-        )
-
         traces = await event.receivers.get_waveforms_restituted(
             squirrel,
             seconds_before=self.seconds_before,
             seconds_after=self.seconds_after,
             seconds_fade=self.taper_seconds,
-            cut_off_fade=cut_off_fade,
             quantity=model.restitution_quantity,
+            cut_off_fade=False,
             phase=None,
             filter_clipped=True,
         )
@@ -194,11 +204,19 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
             logger.warning("No restituted traces found for event %s", event.time)
             return
 
+        if model.highpass_freq is not None:
+            for tr in traces:
+                tr.highpass(order=4, corner=model.highpass_freq)
+        if model.lowpass_freq is not None:
+            for tr in traces:
+                tr.lowpass(order=4, corner=model.lowpass_freq)
+
         if model.max_amplitude == "wood-anderson":
             traces = [
                 await asyncio.to_thread(
                     tr.transfer,
                     transfer_function=WOOD_ANDERSON,
+                    freqlimits=(0.5, 1.0, 100.0, 200.0),
                     tfade=self.taper_seconds,
                     cut_off_fading=True,
                     demean=True,
@@ -211,6 +229,7 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
                 await asyncio.to_thread(
                     tr.transfer,
                     transfer_function=WOOD_ANDERSON_OLD,
+                    freqlimits=(0.5, 1.0, 100.0, 200.0),
                     tfade=self.taper_seconds,
                     cut_off_fading=True,
                     demean=True,
@@ -218,6 +237,13 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
                 )
                 for tr in traces
             ]
+        else:
+            for tr in traces:
+                tr.chop(
+                    tr.tmin + self.taper_seconds,
+                    tr.tmax - self.taper_seconds,
+                    inplace=True,
+                )
 
         grouped_traces = []
         receivers = []
@@ -230,6 +256,7 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
             grouped_traces=grouped_traces,
             receivers=receivers,
             event=event,
+            min_snr=self.min_signal_noise_ratio,
         )
 
         if not np.isfinite(local_magnitude.average):

@@ -79,4 +79,4 @@ class DetectionUncertainty(BaseModel):
     @computed_field
     def vertical(self) -> float:
         """Calculate the vertical uncertainty in [m]."""
-        return float(sum(self.depth))
+        return float(self.depth[1] - self.depth[0])

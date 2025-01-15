@@ -630,6 +630,7 @@ class ChannelSelector:
 
 class ChannelSelectors:
     All = ChannelSelector("ENZ0123RT", number_channels=3)
+    AllAbsolute = ChannelSelector("ENZ0123RT", number_channels=3, absolute=True)
     HorizontalAbs = ChannelSelector("EN123RT", number_channels=2, absolute=True)
     HorizontalAvg = ChannelSelector("EN123RT", number_channels=2, average=True)
     Horizontal = ChannelSelector("EN123RT", number_channels=2)
