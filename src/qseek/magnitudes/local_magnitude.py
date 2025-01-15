@@ -199,6 +199,7 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
                 await asyncio.to_thread(
                     tr.transfer,
                     transfer_function=WOOD_ANDERSON,
+                    freqlimits=(0.5, 1.0, 100.0, 200.0),
                     tfade=self.taper_seconds,
                     cut_off_fading=True,
                     demean=True,
@@ -211,6 +212,7 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
                 await asyncio.to_thread(
                     tr.transfer,
                     transfer_function=WOOD_ANDERSON_OLD,
+                    freqlimits=(0.5, 1.0, 100.0, 200.0),
                     tfade=self.taper_seconds,
                     cut_off_fading=True,
                     demean=True,
@@ -218,6 +220,11 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
                 )
                 for tr in traces
             ]
+
+        if model.highpass is not None:
+            traces = [tr.highpass(order=4, corner=model.highpass) for tr in traces]
+        if model.lowpass is not None:
+            traces = [tr.lowpass(order=4, corner=model.lowpass) for tr in traces]
 
         grouped_traces = []
         receivers = []

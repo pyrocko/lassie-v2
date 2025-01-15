@@ -185,8 +185,8 @@ class StationAmplitudes(NamedTuple):
             for tr in traces
         ]
 
-        peak_amp = max(np.abs(tr.ydata).max() for tr in traces)
-        noise_amp = max(np.abs(tr.ydata).max() for tr in noise_traces)
+        peak_amp = max(np.ptp(tr.ydata) / 2 for tr in traces)
+        noise_amp = max(np.ptp(tr.ydata) / 2 for tr in noise_traces)
         std_noise = max(np.std(tr.ydata) for tr in noise_traces)
 
         return cls(
