@@ -365,6 +365,7 @@ class EventReceivers(BaseModel):
         phase: PhaseDescription | None = None,
         quantity: MeasurementUnit = "velocity",
         demean: bool = True,
+        freq_limits: tuple[float, float, float, float] | None = None,
         filter_clipped: bool = False,
         receivers: Iterable[Receiver] | None = None,
     ) -> list[Trace]:
@@ -385,6 +386,9 @@ class EventReceivers(BaseModel):
             quantity (MeasurementUnit, optional): The measurement unit.
                 Defaults to "velocity".
             demean (bool, optional): Whether to demean the waveforms. Defaults to True.
+            freq_limits (tuple[float, float, float, float] | None, optional): The
+                limits for the frequency bandpass filter. If None
+                the default limits are used. Defaults to None.
             remove_clipped (bool, optional): Whether to remove clipped traces.
                 Defaults to False.
             receivers (list[Receiver] | None, optional): The receivers to retrieve
@@ -433,7 +437,8 @@ class EventReceivers(BaseModel):
                 await asyncio.to_thread(
                     tr.transfer,
                     transfer_function=response.get_effective(input_quantity=quantity),
-                    freqlimits=(0.005, 0.05, 0.45 / tr.deltat, 0.5 / tr.deltat),
+                    freqlimits=freq_limits
+                    or (0.05, 0.1, 0.40 / tr.deltat, 0.45 / tr.deltat),
                     tfade=seconds_fade,
                     cut_off_fading=cut_off_fade,
                     demean=demean,

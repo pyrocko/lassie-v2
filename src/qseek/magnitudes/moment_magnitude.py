@@ -242,8 +242,8 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
     magnitude: Literal["MomentMagnitude"] = "MomentMagnitude"
 
     seconds_before: PositiveFloat = Field(
-        default=2.0,
-        ge=1.0,
+        default=4.0,
+        ge=1.5,
         description="Waveforms to extract before P phase arrival. The noise amplitude "
         "is extracted from before the P phase arrival, with a one second padding.",
     )
@@ -258,7 +258,7 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
         "before the analysis.",
     )
     min_signal_noise_ratio: float = Field(
-        default=3.0,
+        default=1.5,
         ge=1.0,
         description="Minimum signal-to-noise ratio for the magnitude estimation. "
         "The noise amplitude is extracted from before the P phase arrival,"

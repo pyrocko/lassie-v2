@@ -236,7 +236,7 @@ class WebnetWesternBohemia(LocalMagnitudeModel):
     ) -> float:
         return (
             np.log10(amplitude * UM)
-            - np.log10(np.pi)
+            - np.log10(2 * np.pi)
             + 2.1 * np.log10(distance_hypo / KM)
             - 1.7
         )

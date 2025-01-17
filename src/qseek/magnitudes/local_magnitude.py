@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.ticker import FuncFormatter
 from pydantic import Field, PositiveFloat, PrivateAttr, model_validator
+from pyrocko import io
 from typing_extensions import Self
 
 from qseek.magnitudes.base import (
@@ -42,13 +44,13 @@ class LocalMagnitude(EventMagnitude):
         description="The estimator to use for calculating the local magnitude.",
     )
     station_magnitudes: list[StationLocalMagnitude] = []
-    average: float = Field(
-        default=0.0,
+    average: float | None = Field(
+        default=None,
         description="The network's local magnitude, as median of"
         " all station magnitudes.",
     )
-    error: float = Field(
-        default=0.0,
+    error: float | None = Field(
+        default=None,
         description="Average error of local magnitude, as median absolute deviation.",
     )
 
@@ -74,13 +76,9 @@ class LocalMagnitude(EventMagnitude):
                 continue
             self.station_magnitudes.append(station_magnitude)
 
-        if not self.station_magnitudes:
-            return self
-
         median = np.median(self.magnitudes)
         self.average = float(median)
         self.error = float(np.median(np.abs(self.magnitudes - median)))  # MAD
-
         return self
 
     @property
@@ -146,8 +144,8 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
     magnitude: Literal["LocalMagnitude"] = "LocalMagnitude"
 
     seconds_before: PositiveFloat = Field(
-        default=2.0,
-        ge=1.0,
+        default=4.0,
+        ge=1.5,
         description="Waveforms to extract before P phase arrival. The noise amplitude "
         "is extracted from before the P phase arrival, with 0.5 s padding.",
     )
@@ -172,6 +170,11 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
     model: ModelName = Field(
         default="iaspei-southern-california",
         description="The estimator to use for calculating the local magnitude.",
+    )
+
+    save_restituted_traces: bool = Field(
+        default=False,
+        description="Save the restituted traces to MiniSeed.",
     )
 
     _model: LocalMagnitudeModel = PrivateAttr()
@@ -204,21 +207,14 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
             logger.warning("No restituted traces found for event %s", event.time)
             return
 
-        if model.highpass_freq is not None:
-            for tr in traces:
-                tr.highpass(order=4, corner=model.highpass_freq)
-        if model.lowpass_freq is not None:
-            for tr in traces:
-                tr.lowpass(order=4, corner=model.lowpass_freq)
-
         if model.max_amplitude == "wood-anderson":
             traces = [
                 await asyncio.to_thread(
                     tr.transfer,
                     transfer_function=WOOD_ANDERSON,
-                    freqlimits=(0.5, 1.0, 100.0, 200.0),
+                    freqlimits=(0.5, 1.0, 0.40 / tr.deltat, 0.45 / tr.deltat),
                     tfade=self.taper_seconds,
-                    cut_off_fading=True,
+                    cut_off_fading=False,
                     demean=True,
                     invert=False,
                 )
@@ -229,21 +225,32 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
                 await asyncio.to_thread(
                     tr.transfer,
                     transfer_function=WOOD_ANDERSON_OLD,
-                    freqlimits=(0.5, 1.0, 100.0, 200.0),
+                    freqlimits=(0.5, 1.0, 0.40 / tr.deltat, 0.45 / tr.deltat),
                     tfade=self.taper_seconds,
-                    cut_off_fading=True,
+                    cut_off_fading=False,
                     demean=True,
                     invert=False,
                 )
                 for tr in traces
             ]
-        else:
+
+        if model.highpass_freq is not None:
             for tr in traces:
-                tr.chop(
-                    tr.tmin + self.taper_seconds,
-                    tr.tmax - self.taper_seconds,
-                    inplace=True,
-                )
+                tr.highpass(order=4, corner=model.highpass_freq)
+        if model.lowpass_freq is not None:
+            for tr in traces:
+                tr.lowpass(order=4, corner=model.lowpass_freq)
+
+        for tr in traces:
+            tr.chop(
+                tr.tmin + self.taper_seconds,
+                tr.tmax - self.taper_seconds,
+                inplace=True,
+            )
+
+        if self.save_restituted_traces:
+            Path("event_traces").mkdir(exist_ok=True)
+            io.save(traces, f"event_traces/{event.time}_restituted.mseed")
 
         grouped_traces = []
         receivers = []
