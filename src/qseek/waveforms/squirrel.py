@@ -14,7 +14,6 @@ from pydantic import (
     PositiveInt,
     PrivateAttr,
     computed_field,
-    constr,
     field_validator,
     model_validator,
 )
@@ -122,7 +121,7 @@ class PyrockoSquirrel(WaveformProvider):
         " for faster loading of large data sets.",
     )
     waveform_dirs: list[Path] = Field(
-        default=["./data"],
+        default=[Path("./data")],
         description="List of directories holding the waveform files.",
     )
     start_time: AwareDatetime | None = Field(
@@ -138,13 +137,6 @@ class PyrockoSquirrel(WaveformProvider):
         "E.g. `2024-12-31T00:00:00Z`.",
     )
 
-    channel_selector: list[constr(to_upper=True, max_length=2, min_length=2)] | None = (
-        Field(
-            default=None,
-            min_length=1,
-            description="Channel selector for waveforms, " "e.g. `['HH', 'EN']`.",
-        )
-    )
     n_threads: PositiveInt = Field(
         default=8,
         description="Number of threads for loading waveforms,"

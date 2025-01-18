@@ -658,21 +658,16 @@ class Search(BaseModel):
         if not event.in_bounds:
             return event
 
-        try:
-            squirrel = self.data_provider.get_squirrel()
-        except NotImplementedError:
-            return event
-
         async with self._compute_semaphore:
             for mag_calculator in self.magnitudes:
                 if not recalculate and mag_calculator.has_magnitude(event):
                     continue
                 logger.debug("adding magnitude from %s", mag_calculator.magnitude)
-                await mag_calculator.add_magnitude(squirrel, event)
+                await mag_calculator.add_magnitude(self.data_provider, event)
 
             for feature_calculator in self.features:
                 logger.debug("adding features from %s", feature_calculator.feature)
-                await feature_calculator.add_features(squirrel, event)
+                await feature_calculator.add_features(self.data_provider, event)
         return event
 
     @classmethod

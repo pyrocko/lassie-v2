@@ -175,8 +175,12 @@ class LocalMagnitudeModel:
 
         try:
             traces = _COMPONENT_MAP[self.component](traces)
-        except (KeyError, AttributeError):
-            logger.debug("Could not get channels for %s", receiver.nsl.pretty)
+        except (KeyError, AttributeError) as exc:
+            logger.warning(
+                "Could get all required channels for %s: %s",
+                receiver.nsl.pretty,
+                str(exc),
+            )
             return None
         if not traces:
             return None
@@ -236,7 +240,7 @@ class WebnetWesternBohemia(LocalMagnitudeModel):
     ) -> float:
         return (
             np.log10(amplitude * UM)
-            - np.log10(2 * np.pi)
+            - np.log10(np.pi)
             + 2.1 * np.log10(distance_hypo / KM)
             - 1.7
         )
@@ -282,6 +286,7 @@ class CentralCalifornia(WoodAnderson, LocalMagnitudeModel):
     epicentral_range = Range(0.0 * KM, 400.0 * KM)
     component = "horizontal-avg"
     max_amplitude = "wood-anderson-old"
+    highpass_freq = 1.0
 
     @staticmethod
     def get_amp_attenuation(dist_hypo_km: float, dist_epi_km: float) -> float:

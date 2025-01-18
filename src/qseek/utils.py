@@ -575,11 +575,11 @@ class ChannelSelector:
     absolute: bool = False
     average: bool = False
 
-    def get_traces(self, traces_flt: list[Trace]) -> list[Trace]:
+    def get_traces(self, traces: list[Trace]) -> list[Trace]:
         """Filter and normalize a list of traces based on the specified channels.
 
         Args:
-            traces_flt (list[Trace]): The list of traces to filter.
+            traces (list[Trace]): The list of traces to filter.
 
         Returns:
             list[Trace]: The filtered and normalized list of traces.
@@ -588,29 +588,56 @@ class ChannelSelector:
             KeyError: If the number of channels in the filtered list does not match
                 the expected number of channels.
         """
-        nsls = {tr.nslc_id[:3] for tr in traces_flt}
+        nsls = {tr.nslc_id[:3] for tr in traces}
         if len(nsls) != 1:
             raise AttributeError(
                 f"cannot get traces for selector {self.channels}"
-                f" available: {', '.join('.'.join(tr.nslc_id) for tr in traces_flt)}"
+                f" available traces: {', '.join('.'.join(tr.nslc_id) for tr in traces)}"
             )
 
-        traces_flt = [tr for tr in traces_flt if tr.channel[-1] in self.channels]
-
-        tmins = {tr.tmin for tr in traces_flt}
-        tmaxs = {tr.tmax for tr in traces_flt}
-        if len(tmins) != 1 or len(tmaxs) != 1:
-            raise AttributeError(
-                f"unhealthy timing on channels {self.channels}",
-                f" for: {', '.join('.'.join(tr.nslc_id) for tr in traces_flt)}",
-            )
+        traces_flt = [tr for tr in traces if tr.channel[-1] in self.channels]
 
         if len(traces_flt) != self.number_channels:
             raise KeyError(
                 f"cannot get {self.number_channels} channels"
                 f" for selector {self.channels}"
-                f" available: {', '.join('.'.join(tr.nslc_id) for tr in traces_flt)}"
+                f" available traces:"
+                f" {', '.join('.'.join(tr.nslc_id) for tr in traces_flt)}"
             )
+
+        delta_ts = {tr.deltat for tr in traces_flt}
+        if len(delta_ts) != 1:
+            raise AttributeError(
+                f"unhealthy sampling rate on channels {self.channels}",
+                f" for: {', '.join('.'.join(tr.nslc_id) for tr in traces_flt)}",
+            )
+
+        deltat_t = next(iter(delta_ts))
+
+        tmins = {tr.tmin for tr in traces_flt}
+        tmaxs = {tr.tmax for tr in traces_flt}
+
+        tmin_diff = abs(max(tmins) - min(tmins))
+        tmax_diff = abs(max(tmaxs) - min(tmaxs))
+
+        if tmin_diff > deltat_t or tmax_diff > deltat_t:
+            raise AttributeError(
+                f"unhealthy timing on channels {self.channels}",
+                f" for: {', '.join('.'.join(tr.nslc_id) for tr in traces_flt)}",
+            )
+
+        nsamples = tuple(tr.ydata.size for tr in traces_flt)
+        nsamples_diff = max(nsamples) - min(nsamples)
+
+        if nsamples_diff == 1:
+            for tr in traces_flt:
+                tr.set_ydata(tr.ydata[: min(nsamples)].copy())
+        elif nsamples_diff > 1:
+            raise AttributeError(
+                f"unhealthy nsamples on channels {self.channels}",
+                f" for: {', '.join('.'.join(tr.nslc_id) for tr in traces_flt)}",
+            )
+
         if self.absolute:
             traces_norm = traces_flt[0].copy()
             data = np.atleast_2d(np.array([tr.ydata for tr in traces_flt]))

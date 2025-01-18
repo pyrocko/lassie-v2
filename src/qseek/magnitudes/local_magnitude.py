@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-from pathlib import Path
+import math
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.ticker import FuncFormatter
-from pydantic import Field, PositiveFloat, PrivateAttr, model_validator
+from pydantic import Field, NewPath, PositiveFloat, PrivateAttr, model_validator
 from pyrocko import io
 from typing_extensions import Self
 
@@ -23,12 +23,13 @@ from qseek.magnitudes.local_magnitude_model import (
     ModelName,
     StationLocalMagnitude,
 )
+from qseek.utils import time_to_path
 
 if TYPE_CHECKING:
-    from pyrocko.squirrel import Squirrel
     from pyrocko.trace import Trace
 
     from qseek.models.detection import EventDetection, Receiver
+    from qseek.waveforms.providers import WaveformProvider
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +45,13 @@ class LocalMagnitude(EventMagnitude):
         description="The estimator to use for calculating the local magnitude.",
     )
     station_magnitudes: list[StationLocalMagnitude] = []
-    average: float | None = Field(
-        default=None,
+    average: float = Field(
+        default=math.nan,
         description="The network's local magnitude, as median of"
         " all station magnitudes.",
     )
-    error: float | None = Field(
-        default=None,
+    error: float = Field(
+        default=math.nan,
         description="Average error of local magnitude, as median absolute deviation.",
     )
 
@@ -75,6 +76,10 @@ class LocalMagnitude(EventMagnitude):
             if station_magnitude is None:
                 continue
             self.station_magnitudes.append(station_magnitude)
+
+        if not self.station_magnitudes:
+            logger.warning("No station magnitudes found for event %s", event.time)
+            return cls()
 
         median = np.median(self.magnitudes)
         self.average = float(median)
@@ -172,9 +177,9 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
         description="The estimator to use for calculating the local magnitude.",
     )
 
-    save_restituted_traces: bool = Field(
-        default=False,
-        description="Save the restituted traces to MiniSeed.",
+    export_mseed: NewPath | None = Field(
+        default=None,
+        description="Path to export the processed mseed traces to.",
     )
 
     _model: LocalMagnitudeModel = PrivateAttr()
@@ -190,17 +195,20 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
                 return True
         return False
 
-    async def add_magnitude(self, squirrel: Squirrel, event: EventDetection) -> None:
+    async def add_magnitude(
+        self, waveform_provider: WaveformProvider, event: EventDetection
+    ) -> None:
         model = self._model
 
         traces = await event.receivers.get_waveforms_restituted(
-            squirrel,
+            waveform_provider.get_squirrel(),
             seconds_before=self.seconds_before,
             seconds_after=self.seconds_after,
-            seconds_fade=self.taper_seconds,
+            seconds_taper=self.taper_seconds,
             quantity=model.restitution_quantity,
-            cut_off_fade=False,
+            channels=waveform_provider.channel_selector,
             phase=None,
+            cut_off_taper=False,
             filter_clipped=True,
         )
         if not traces:
@@ -248,9 +256,10 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
                 inplace=True,
             )
 
-        if self.save_restituted_traces:
-            Path("event_traces").mkdir(exist_ok=True)
-            io.save(traces, f"event_traces/{event.time}_restituted.mseed")
+        if self.export_mseed is not None:
+            file_name = self.export_mseed / f"{time_to_path(event.time)}.mseed"
+            logger.debug("saving restituted mseed traces to %s", file_name)
+            io.save(traces, str(file_name))
 
         grouped_traces = []
         receivers = []

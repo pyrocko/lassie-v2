@@ -10,11 +10,10 @@ from typing_extensions import Self
 from qseek.utils import NSL
 
 if TYPE_CHECKING:
-    from pyrocko.squirrel import Squirrel
-
     from qseek.models.detection import EventDetection, Receiver
     from qseek.models.station import Stations
     from qseek.octree import Octree
+    from qseek.waveforms.providers import WaveformProvider
 
 KM = 1e3
 
@@ -125,13 +124,13 @@ class EventMagnitudeCalculator(BaseModel):
 
     async def add_magnitude(
         self,
-        squirrel: Squirrel,
+        waveform_provider: WaveformProvider,
         event: EventDetection,
     ) -> None:
         """Adds a magnitude to the squirrel for the given event.
 
         Args:
-            squirrel (Squirrel): The squirrel object to add the magnitude to.
+            waveform_provider (WaveformProvider): The waveform provider.
             event (EventDetection): The event detection object.
 
         Raises:

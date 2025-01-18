@@ -28,15 +28,16 @@ from qseek.utils import (
     ChannelSelectors,
     MeasurementUnit,
     Range,
+    time_to_path,
 )
 
 if TYPE_CHECKING:
-    from pyrocko.squirrel import Squirrel
     from pyrocko.trace import Trace
 
     from qseek.models.detection import EventDetection, Receiver
     from qseek.models.station import Stations
     from qseek.octree import Octree
+    from qseek.waveforms.base import WaveformProvider
 
 
 logger = logging.getLogger(__name__)
@@ -269,7 +270,7 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
         default=[Path(".")],
         description="The directories of the Pyrocko GF stores.",
     )
-    processed_mseed_export: NewPath | None = Field(
+    export_mseed: NewPath | None = Field(
         default=None,
         description="Path to export the processed mseed traces to.",
     )
@@ -305,7 +306,7 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
 
     async def add_magnitude(
         self,
-        squirrel: Squirrel,
+        waveform_provider: WaveformProvider,
         event: EventDetection,
     ) -> None:
         moment_magnitude = MomentMagnitude()
@@ -331,14 +332,15 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
                 continue
 
             traces = await event.receivers.get_waveforms_restituted(
-                squirrel,
+                waveform_provider.get_squirrel(),
                 receivers=store_receivers,
                 quantity=store.quantity,
                 seconds_before=self.seconds_before,
                 seconds_after=self.seconds_after,
+                seconds_taper=self.taper_seconds,
+                channels=waveform_provider.channel_selector,
                 demean=True,
-                seconds_fade=self.taper_seconds,
-                cut_off_fade=False,
+                cut_off_taper=False,
                 filter_clipped=True,
             )
             if not traces:
@@ -360,11 +362,10 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
                 )
                 tr.chop(tr.tmin + self.taper_seconds, tr.tmax - self.taper_seconds)
 
-            if self.processed_mseed_export is not None:
-                logger.debug(
-                    "saving processed mseed traces to %s", self.processed_mseed_export
-                )
-                io.save(traces, str(self.processed_mseed_export), append=True)
+            if self.export_mseed is not None:
+                file_name = self.export_mseed / f"{time_to_path(event.time)}.mseed"
+                logger.debug("saving restituted mseed traces to %s", file_name)
+                io.save(traces, str(file_name))
 
             grouped_traces = []
             receivers = []
