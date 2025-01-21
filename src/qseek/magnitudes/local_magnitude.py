@@ -4,11 +4,12 @@ import asyncio
 import itertools
 import logging
 import math
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.ticker import FuncFormatter
-from pydantic import Field, NewPath, PositiveFloat, PrivateAttr, model_validator
+from pydantic import Field, PositiveFloat, PrivateAttr, model_validator
 from pyrocko import io
 from typing_extensions import Self
 
@@ -177,7 +178,7 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
         description="The estimator to use for calculating the local magnitude.",
     )
 
-    export_mseed: NewPath | None = Field(
+    export_mseed: Path | None = Field(
         default=None,
         description="Path to export the processed mseed traces to.",
     )

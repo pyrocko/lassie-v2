@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Literal, NamedTuple
 
 import numpy as np
-from pydantic import DirectoryPath, Field, NewPath, PositiveFloat, PrivateAttr
+from pydantic import DirectoryPath, Field, PositiveFloat, PrivateAttr
 from pyrocko import gf, io
 
 from qseek.magnitudes.base import (
@@ -130,6 +130,7 @@ class StationMomentMagnitude(NamedTuple):
     magnitude: float
     error: float
     peak: float
+    snr: float = 0.0
 
 
 class MomentMagnitude(EventMagnitude):
@@ -223,6 +224,7 @@ class MomentMagnitude(EventMagnitude):
                 magnitude=magnitude,
                 error=(error_upper + abs(error_lower)) / 2,
                 peak=station.peak,
+                snr=station.snr,
             )
             self.station_magnitudes.append(station_magnitude)
 
@@ -270,7 +272,7 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
         default=[Path(".")],
         description="The directories of the Pyrocko GF stores.",
     )
-    export_mseed: NewPath | None = Field(
+    export_mseed: Path | None = Field(
         default=None,
         description="Path to export the processed mseed traces to.",
     )

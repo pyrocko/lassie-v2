@@ -103,6 +103,7 @@ class StationLocalMagnitude(NamedTuple):
     peak_amp: float
     distance_epi: float
     distance_hypo: float
+    snr: float = 0.0
 
 
 class LocalMagnitudeModel:
@@ -216,6 +217,7 @@ class LocalMagnitudeModel:
             magnitude=magnitude,
             magnitude_error=(magnitude_error_upper + abs(magnitude_error_lower)) / 2,
             peak_amp=sta.peak,
+            snr=sta.snr,
             distance_epi=sta.distance_epi,
             distance_hypo=sta.distance_hypo,
         )
