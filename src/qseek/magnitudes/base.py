@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 import numpy as np
@@ -24,21 +25,17 @@ class EventMagnitude(BaseModel):
     magnitude: Literal["EventMagnitude"] = "EventMagnitude"
 
     average: float = Field(
-        default=0.0,
-        description="Average local magnitude.",
-    )
-    median: float = Field(
-        default=0.0,
-        description="Average local magnitude.",
+        default=math.nan,
+        description="The network's magnitude, as median of" " all station magnitudes.",
     )
     error: float = Field(
-        default=0.0,
-        description="Average error of local magnitude.",
+        default=math.nan,
+        description="Average error of the magnitude from median absolute deviation.",
     )
 
     @classmethod
     def get_subclasses(cls) -> tuple[type[EventMagnitude], ...]:
-        """Get the subclasses of this class.
+        """Get all subclasses of this class.
 
         Returns:
             list[type]: The subclasses of this class.
@@ -159,7 +156,7 @@ class StationAmplitudes(NamedTuple):
     station_nsl: NSL
     peak: float
     noise: float
-    std_noise: float
+    noise_std: float
 
     distance_epi: float
     distance_hypo: float
@@ -186,22 +183,27 @@ class StationAmplitudes(NamedTuple):
             tr.chop(tmin=tr.tmin, tmax=first_arrival - noise_padding, inplace=False)
             for tr in traces
         ]
+        signal_traces = [
+            tr.chop(tmin=first_arrival - noise_padding, tmax=tr.tmax, inplace=False)
+            for tr in traces
+        ]
 
         if measurement == "peak-to-peak":
-            peak_amp = max(np.ptp(tr.ydata) / 2 for tr in traces)
+            peak_amp = max(np.ptp(tr.ydata) / 2 for tr in signal_traces)
+            noise_amp = max(np.ptp(tr.ydata) / 2 for tr in noise_traces)
         elif measurement == "max-amplitude":
-            peak_amp = max(np.max(np.abs(tr.ydata)) for tr in traces)
+            peak_amp = max(np.max(np.abs(tr.ydata)) for tr in signal_traces)
+            noise_amp = max(np.max(np.abs(tr.ydata)) for tr in noise_traces)
         else:
             raise ValueError(f"Invalid peak measurement: {measurement}")
 
-        noise_amp = max(np.max(np.abs(tr.ydata)) for tr in noise_traces)
-        std_noise = max(np.std(tr.ydata) for tr in noise_traces)
+        noise_std = max(np.std(tr.ydata) for tr in noise_traces)
 
         return cls(
             station_nsl=receiver.nsl,
             peak=peak_amp,
             noise=noise_amp,
-            std_noise=std_noise,
+            noise_std=noise_std,
             distance_hypo=receiver.distance_to(event),
             distance_epi=receiver.surface_distance_to(event),
         )

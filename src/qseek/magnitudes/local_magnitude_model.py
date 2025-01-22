@@ -288,7 +288,6 @@ class CentralCalifornia(WoodAnderson, LocalMagnitudeModel):
     epicentral_range = Range(0.0 * KM, 400.0 * KM)
     component = "horizontal-avg"
     max_amplitude = "wood-anderson-old"
-    highpass_freq = 1.0
 
     @staticmethod
     def get_amp_attenuation(dist_hypo_km: float, dist_epi_km: float) -> float:

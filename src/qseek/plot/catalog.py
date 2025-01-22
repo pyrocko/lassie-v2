@@ -97,7 +97,7 @@ def plot_magnitudes(catalog: EventCatalog):
             continue
         depths.append(ev.effective_depth)
         local_mags.append(local_mag.average)
-        mw_mags.append(mw_mag.average)
+        mw_mags.append(mw_mag.magnitude)
 
     depth_sorted = np.argsort(depths)
     depths = np.array(depths)[depth_sorted] / KM

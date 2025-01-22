@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -46,15 +45,6 @@ class LocalMagnitude(EventMagnitude):
         description="The estimator to use for calculating the local magnitude.",
     )
     station_magnitudes: list[StationLocalMagnitude] = []
-    average: float = Field(
-        default=math.nan,
-        description="The network's local magnitude, as median of"
-        " all station magnitudes.",
-    )
-    error: float = Field(
-        default=math.nan,
-        description="Average error of local magnitude, as median absolute deviation.",
-    )
 
     @classmethod
     async def from_model(
@@ -80,7 +70,7 @@ class LocalMagnitude(EventMagnitude):
 
         if not self.station_magnitudes:
             logger.warning("No station magnitudes found for event %s", event.time)
-            return cls()
+            return self
 
         median = np.median(self.magnitudes)
         self.average = float(median)
@@ -149,8 +139,8 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
 
     magnitude: Literal["LocalMagnitude"] = "LocalMagnitude"
 
-    seconds_before: PositiveFloat = Field(
-        default=4.0,
+    noise_window: PositiveFloat = Field(
+        default=5.0,
         ge=1.5,
         description="Waveforms to extract before P phase arrival. The noise amplitude "
         "is extracted from before the P phase arrival, with 0.5 s padding.",
@@ -203,7 +193,7 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
 
         traces = await event.receivers.get_waveforms_restituted(
             waveform_provider.get_squirrel(),
-            seconds_before=self.seconds_before,
+            seconds_before=self.noise_window,
             seconds_after=self.seconds_after,
             seconds_taper=self.taper_seconds,
             quantity=model.restitution_quantity,
@@ -217,50 +207,56 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
             return
 
         if model.max_amplitude == "wood-anderson":
-            traces = [
-                await asyncio.to_thread(
-                    tr.transfer,
-                    transfer_function=WOOD_ANDERSON,
-                    freqlimits=(0.5, 1.0, 0.40 / tr.deltat, 0.45 / tr.deltat),
-                    tfade=self.taper_seconds,
-                    cut_off_fading=False,
-                    demean=True,
-                    invert=False,
-                )
-                for tr in traces
-            ]
+            traces = await asyncio.gather(
+                *[
+                    asyncio.to_thread(
+                        tr.transfer,
+                        transfer_function=WOOD_ANDERSON,
+                        freqlimits=(0.1, 1.0, 0.40 / tr.deltat, 0.45 / tr.deltat),
+                        tfade=self.taper_seconds,
+                        cut_off_fading=False,
+                        demean=True,
+                        invert=False,
+                    )
+                    for tr in traces
+                ]
+            )
         elif model.max_amplitude == "wood-anderson-old":
-            traces = [
-                await asyncio.to_thread(
-                    tr.transfer,
-                    transfer_function=WOOD_ANDERSON_OLD,
-                    freqlimits=(0.5, 1.0, 0.40 / tr.deltat, 0.45 / tr.deltat),
-                    tfade=self.taper_seconds,
-                    cut_off_fading=False,
-                    demean=True,
-                    invert=False,
-                )
-                for tr in traces
-            ]
+            traces = await asyncio.gather(
+                *[
+                    asyncio.to_thread(
+                        tr.transfer,
+                        transfer_function=WOOD_ANDERSON_OLD,
+                        freqlimits=(0.1, 1.0, 0.40 / tr.deltat, 0.45 / tr.deltat),
+                        tfade=self.taper_seconds,
+                        cut_off_fading=False,
+                        demean=True,
+                        invert=False,
+                    )
+                    for tr in traces
+                ]
+            )
 
         if model.highpass_freq is not None:
             for tr in traces:
-                tr.highpass(order=4, corner=model.highpass_freq)
+                await asyncio.to_thread(
+                    tr.highpass, order=4, corner=model.highpass_freq
+                )
         if model.lowpass_freq is not None:
             for tr in traces:
-                tr.lowpass(order=4, corner=model.lowpass_freq)
+                await asyncio.to_thread(tr.lowpass, order=4, corner=model.lowpass_freq)
 
         for tr in traces:
-            tr.chop(
+            await asyncio.to_thread(
+                tr.chop,
                 tr.tmin + self.taper_seconds,
                 tr.tmax - self.taper_seconds,
-                inplace=True,
             )
 
         if self.export_mseed is not None:
             file_name = self.export_mseed / f"{time_to_path(event.time)}.mseed"
             logger.debug("saving restituted mseed traces to %s", file_name)
-            io.save(traces, str(file_name))
+            await asyncio.to_thread(io.save, traces, str(file_name))
 
         grouped_traces = []
         receivers = []
@@ -275,9 +271,5 @@ class LocalMagnitudeExtractor(EventMagnitudeCalculator):
             event=event,
             min_snr=self.min_signal_noise_ratio,
         )
-
-        if not np.isfinite(local_magnitude.average):
-            logger.warning("Local magnitude is NaN, skipping event %s", event.time)
-            return
 
         event.add_magnitude(local_magnitude)
