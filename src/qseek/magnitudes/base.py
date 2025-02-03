@@ -21,16 +21,30 @@ KM = 1e3
 PeakMeasurement = Literal["peak-to-peak", "max-amplitude"]
 
 
+class StationLocalMagnitude(NamedTuple):
+    station: NSL
+    magnitude: float
+    error: float
+    peak_amp: float
+    distance_epi: float
+    distance_hypo: float
+    snr: float = 0.0
+
+
 class EventMagnitude(BaseModel):
     magnitude: Literal["EventMagnitude"] = "EventMagnitude"
 
-    average: float = Field(
+    average: float | None = Field(
         default=math.nan,
         description="The network's magnitude, as median of" " all station magnitudes.",
     )
-    error: float = Field(
+    error: float | None = Field(
         default=math.nan,
         description="Average error of the magnitude from median absolute deviation.",
+    )
+    station_magnitudes: list[StationLocalMagnitude] = Field(
+        default=[],
+        description="The magnitudes calculated for each station.",
     )
 
     @classmethod
@@ -45,6 +59,10 @@ class EventMagnitude(BaseModel):
     @property
     def name(self) -> str:
         return self.__class__.__name__
+
+    @property
+    def n_observations(self) -> int:
+        return len(self.station_magnitudes)
 
     def csv_row(self) -> dict[str, float]:
         return {

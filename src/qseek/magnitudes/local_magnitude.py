@@ -103,7 +103,7 @@ class LocalMagnitude(EventMagnitude):
         ax.errorbar(
             station_distances_hypo,
             self.magnitudes,
-            yerr=[sta.magnitude_error for sta in self.station_magnitudes],
+            yerr=[sta.error for sta in self.station_magnitudes],
             marker="o",
             mec="k",
             mfc="k",

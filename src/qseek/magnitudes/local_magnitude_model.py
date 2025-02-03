@@ -99,7 +99,7 @@ class Range(NamedTuple):
 class StationLocalMagnitude(NamedTuple):
     station: NSL
     magnitude: float
-    magnitude_error: float
+    error: float
     peak_amp: float
     distance_epi: float
     distance_hypo: float
@@ -215,7 +215,7 @@ class LocalMagnitudeModel:
         return StationLocalMagnitude(
             station=sta.station_nsl,
             magnitude=magnitude,
-            magnitude_error=(magnitude_error_upper + abs(magnitude_error_lower)) / 2,
+            error=(magnitude_error_upper + abs(magnitude_error_lower)) / 2,
             peak_amp=sta.peak,
             snr=sta.snr,
             distance_epi=sta.distance_epi,

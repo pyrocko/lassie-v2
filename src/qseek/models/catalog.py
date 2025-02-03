@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Iterator
+from uuid import UUID
 
 import aiofiles
 import numpy as np
@@ -103,6 +104,20 @@ class EventCatalog(BaseModel):
     def sort(self) -> None:
         """Sort the detections by time."""
         self.events = sorted(self.events, key=lambda d: d.time)
+
+    def get_event(self, uid: UUID):
+        """Get an event by its UUID.
+
+        Args:
+            uid (UUID): The event UUID.
+
+        Returns:
+            EventDetection: The event detection object.
+        """
+        for detection in self.events:
+            if detection.uid == uid:
+                return detection
+        raise KeyError(f"event with uid {uid} not found")
 
     async def filter_events_by_time(
         self,
