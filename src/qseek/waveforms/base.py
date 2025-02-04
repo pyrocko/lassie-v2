@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, AsyncIterator, Literal
 
 import numpy as np
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, constr
 from pyrocko.trace import Trace
 
 from qseek.stats import Stats
@@ -92,6 +92,14 @@ class WaveformBatch:
 
 class WaveformProvider(BaseModel):
     provider: Literal["WaveformProvider"] = "WaveformProvider"
+
+    channel_selector: list[constr(to_upper=True, max_length=2, min_length=2)] | None = (
+        Field(
+            default=None,
+            min_length=1,
+            description="Channel selector for waveforms, " "e.g. `['HH', 'EN']`.",
+        )
+    )
 
     _queue: Queue[WaveformBatch | None] = PrivateAttr(default_factory=lambda: Queue())
     _stats: Stats = PrivateAttr(default_factory=Stats)

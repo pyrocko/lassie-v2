@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
+from pyrocko.io import save
 
 from qseek.models.station import Stations
-from qseek.utils import PhaseDescription, resample
+from qseek.utils import SDS_PYROCKO_SCHEME, PhaseDescription, resample
 
 if TYPE_CHECKING:
     from pyrocko.trace import Trace
@@ -25,11 +28,20 @@ class ObservedArrival:
 class ImageFunction(BaseModel):
     image: Literal["base"] = "base"
 
-    async def process_traces(self, traces: list[Trace]) -> list[WaveformImage]: ...
-
     @property
     def name(self) -> str:
         return self.__class__.__name__
+
+    async def process_traces(self, traces: list[Trace]) -> list[WaveformImage]:
+        """Process traces to generate image functions.
+
+        Args:
+            traces (list[Trace]): List of traces to process.
+
+        Returns:
+            list[WaveformImage]: List of image functions.
+        """
+        ...
 
     def get_blinding(self, sampling_rate: float) -> timedelta:
         """Blinding duration for the image function. Added to padded waveforms.
@@ -193,6 +205,22 @@ class WaveformImage:
                 strict=True,
             )
         ]
+
+    async def save_mseed(self, path: Path) -> None:
+        """Save the image traces to disk.
+
+        Args:
+            path (Path): Path to save the traces.
+        """
+        save_traces = [tr.copy() for tr in self.traces]
+        for tr in save_traces:
+            tr.set_ydata((tr.ydata * 1e3).astype(np.int32))
+        await asyncio.to_thread(
+            save,
+            save_traces,
+            f"{path!s}/{SDS_PYROCKO_SCHEME}",
+            append=True,
+        )
 
     def snuffle(self) -> None:
         from pyrocko.trace import snuffle

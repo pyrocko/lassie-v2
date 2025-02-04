@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from contextlib import suppress
 from datetime import datetime, timedelta
 from functools import cached_property
@@ -56,7 +57,7 @@ FILENAME_DETECTIONS = "detections.json"
 FILENAME_RECEIVERS = "detections_receivers.json"
 
 UPDATE_LOCK = asyncio.Lock()
-SQUIRREL_SEM = asyncio.Semaphore(64)
+SQUIRREL_SEM = asyncio.Semaphore(16)
 
 
 RECEIVER_CACHE: WeakValueDictionary[Path, ReceiverCache] = WeakValueDictionary()
@@ -306,6 +307,7 @@ class EventReceivers(BaseModel):
         seconds_after: float = 5.0,
         phase: PhaseDescription | None = None,
         receivers: Iterable[Receiver] | None = None,
+        channels: list[str] | None = None,
     ) -> list[Trace]:
         """Retrieves and restitutes waveforms for a given squirrel.
 
@@ -319,19 +321,21 @@ class EventReceivers(BaseModel):
                 the whole time window is retrieved. Defaults to None.
             receivers (list[Receiver] | None, optional): The receivers to retrieve
                 waveforms for. If None, all receivers are retrieved. Defaults to None.
+            channels (list[str], optional): The channels to retrieve. Defaults to ["*"].
 
         Returns:
             list[Trace]: The restituted waveforms.
         """
-        receivers = receivers or list(self)
+        receivers = receivers or list(self.receivers)
         times = list(
             chain.from_iterable(
                 receiver.get_arrivals_time_window(phase) for receiver in receivers
             )
         )
-        accessor_id = "qseek.event_detection"
         if not times:
             return []
+
+        accessor_id = "qseek.event"
 
         tmin = min(times).timestamp() - seconds_before
         tmax = max(times).timestamp() + seconds_after
@@ -342,8 +346,10 @@ class EventReceivers(BaseModel):
                 codes=nslc_ids,
                 tmin=tmin,
                 tmax=tmax,
+                snap=(math.ceil, math.floor),
                 accessor_id=accessor_id,
-                want_incomplete=False,
+                want_incomplete=True,
+                channel_priorities=channels,
             )
         squirrel.advance_accessor(accessor_id, cache_id="waveform")
 
@@ -360,14 +366,15 @@ class EventReceivers(BaseModel):
         squirrel: Squirrel,
         seconds_before: float = 2.0,
         seconds_after: float = 5.0,
-        seconds_fade: float = 5.0,
-        cut_off_fade: bool = True,
+        seconds_taper: float = 5.0,
+        cut_off_taper: bool = True,
         phase: PhaseDescription | None = None,
         quantity: MeasurementUnit = "velocity",
         demean: bool = True,
+        freq_limits: tuple[float, float, float, float] | None = None,
         filter_clipped: bool = False,
-        freqlimits: tuple[float, float, float, float] = (0.01, 0.1, 25.0, 35.0),
         receivers: Iterable[Receiver] | None = None,
+        channels: list[str] | None = None,
     ) -> list[Trace]:
         """Retrieves and restitutes waveforms for a given squirrel.
 
@@ -377,23 +384,25 @@ class EventReceivers(BaseModel):
                 to retrieve. Defaults to 2.0.
             seconds_after (float, optional): Number of seconds after phase arrival
                 to retrieve. Defaults to 5.0.
-            seconds_fade (float, optional): Number of seconds for fade in/out.
+            seconds_taper (float, optional): Number of seconds for cosine taper.
                 Defaults to 5.0.
-            cut_off_fade (bool, optional): Whether to cut off the fade in/out.
+            cut_off_taper (bool, optional): Whether to cut off the taper.
                 Defaults to True.
             phase (PhaseDescription | None, optional): The phase description. If None,
                 the whole time window is retrieved. Defaults to None.
             quantity (MeasurementUnit, optional): The measurement unit.
                 Defaults to "velocity".
             demean (bool, optional): Whether to demean the waveforms. Defaults to True.
+            freq_limits (tuple[float, float, float, float] | None, optional): The
+                limits for the frequency bandpass filter. If None
+                the default limits are used. Defaults to None.
             remove_clipped (bool, optional): Whether to remove clipped traces.
                 Defaults to False.
-            freqlimits (tuple[float, float, float, float], optional):
-                The frequency limits. Defaults to (0.01, 0.1, 25.0, 35.0).
             receivers (list[Receiver] | None, optional): The receivers to retrieve
                 waveforms for. If None, all receivers are retrieved. Defaults to None.
             filter_clipped (bool, optional): Whether to filter clipped traces.
                 Defaults to False.
+            channels (list[str], optional): The channels to retrieve. Defaults to ["*"].
 
         Returns:
             list[Trace]: The restituted waveforms.
@@ -401,9 +410,10 @@ class EventReceivers(BaseModel):
         traces = await self.get_waveforms(
             squirrel,
             phase=phase,
-            seconds_after=seconds_after + seconds_fade,
-            seconds_before=seconds_before + seconds_fade,
+            seconds_after=seconds_after + seconds_taper,
+            seconds_before=seconds_before + seconds_taper,
             receivers=receivers,
+            channels=channels,
         )
         traces = filter_clipped_traces(traces) if filter_clipped else traces
         if not traces:
@@ -429,20 +439,22 @@ class EventReceivers(BaseModel):
             try:
                 response = get_response(tr)
             except AttributeError:
-                logger.debug("cannot find response for %s", ".".join(tr.nslc_id))
+                logger.warning("cannot find response for %s", ".".join(tr.nslc_id))
                 continue
 
             restituted_traces.append(
                 await asyncio.to_thread(
                     tr.transfer,
                     transfer_function=response.get_effective(input_quantity=quantity),
-                    freqlimits=freqlimits,
-                    tfade=seconds_fade,
-                    cut_off_fading=cut_off_fade,
+                    freqlimits=freq_limits
+                    or (0.05, 0.1, 0.40 / tr.deltat, 0.45 / tr.deltat),
+                    tfade=seconds_taper,
+                    cut_off_fading=cut_off_taper,
                     demean=demean,
                     invert=True,
                 )
             )
+
         return restituted_traces
 
     def get_receiver(self, nsl: NSL) -> Receiver:

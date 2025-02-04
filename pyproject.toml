@@ -1,7 +1,7 @@
 [build-system]
 requires = [
     "wheel",
-    "setuptools >= 61.0.0",
+    "setuptools>=61.0.0",
     "oldest-supported-numpy",
     "setuptools_scm[toml]>=6.2",
 ]
@@ -20,12 +20,11 @@ authors = [
     { name = "Sebastian Heimann", email = "heimann@uni-potsdam.de" },
     { name = "Marius Kriegerowski", email = "mk@quakesaver.de" },
 ]
-maintainers = [
-    { name = "Marius Paul Isken", email = "mi@gfz-potsdam.de" },
-    { name = "Sebastian Heimann", email = "heimann@uni-potsdam.de" },
-]
+maintainers = [{ name = "Marius Paul Isken", email = "mi@gfz-potsdam.de" }]
 keywords = [
+    "seismology",
     "earthquake",
+    "seismicity",
     "detection",
     "localization",
     "stacking-migration",

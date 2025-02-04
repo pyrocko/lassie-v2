@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Literal, NamedTuple
 
 import numpy as np
-from pydantic import DirectoryPath, Field, NewPath, PositiveFloat, PrivateAttr
+from pydantic import DirectoryPath, Field, PositiveFloat, PrivateAttr
 from pyrocko import gf, io
 
 from qseek.magnitudes.base import (
@@ -28,15 +28,17 @@ from qseek.utils import (
     ChannelSelectors,
     MeasurementUnit,
     Range,
+    _Range,
+    time_to_path,
 )
 
 if TYPE_CHECKING:
-    from pyrocko.squirrel import Squirrel
     from pyrocko.trace import Trace
 
     from qseek.models.detection import EventDetection, Receiver
     from qseek.models.station import Stations
     from qseek.octree import Octree
+    from qseek.waveforms.base import WaveformProvider
 
 
 logger = logging.getLogger(__name__)
@@ -74,11 +76,11 @@ class PeakAmplitudeDefinition(PeakAmplitudesBase):
         description="The peak amplitude to use.",
     )
     station_epicentral_range: Range = Field(
-        default=Range(min=1 * KM, max=100 * KM),
+        default=_Range(min=1 * KM, max=100 * KM),
         description="The epicentral distance range of the stations.",
     )
     frequency_range: Range = Field(
-        default=Range(min=2.0, max=20.0),
+        default=_Range(min=2.0, max=20.0),
         description="The frequency range in Hz to filter the traces.",
     )
 
@@ -128,7 +130,8 @@ class StationMomentMagnitude(NamedTuple):
     distance_epi: float
     magnitude: float
     error: float
-    peak: float
+    peak_amp: float
+    snr: float = 0.0
 
 
 class MomentMagnitude(EventMagnitude):
@@ -165,7 +168,8 @@ class MomentMagnitude(EventMagnitude):
         event: EventDetection,
         receivers: list[Receiver],
         traces: list[list[Trace]],
-        noise_padding: float = 0.0,
+        noise_padding: float = 0.5,
+        min_snr: float = 3.0,
     ) -> None:
         for receiver, rcv_traces in zip(receivers, traces, strict=False):
             try:
@@ -181,12 +185,13 @@ class MomentMagnitude(EventMagnitude):
                 traces=rcv_traces,
                 noise_padding=noise_padding,
                 event=event,
+                measurement="max-amplitude",
             )
 
-            if station.anr < 1.0:
-                logger.warning("Station %s has bad ANR", receiver.nsl.pretty)
-                continue
             if station.distance_epi > store.max_distance:
+                continue
+            if station.snr < min_snr:
+                logger.debug("%s has low SNR %g", receiver.nsl.pretty, station.snr)
                 continue
 
             try:
@@ -217,7 +222,8 @@ class MomentMagnitude(EventMagnitude):
                 distance_epi=station.distance_epi,
                 magnitude=magnitude,
                 error=(error_upper + abs(error_lower)) / 2,
-                peak=station.peak,
+                peak_amp=station.peak,
+                snr=station.snr,
             )
             self.station_magnitudes.append(station_magnitude)
 
@@ -226,9 +232,7 @@ class MomentMagnitude(EventMagnitude):
 
         magnitudes = np.array([sta.magnitude for sta in self.station_magnitudes])
         median = np.median(magnitudes)
-
-        self.median = float(median)
-        self.average = float(np.mean(magnitudes))
+        self.average = float(median)
         self.error = float(np.median(np.abs(magnitudes - median)))  # MAD
 
 
@@ -237,9 +241,11 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
 
     magnitude: Literal["MomentMagnitude"] = "MomentMagnitude"
 
-    seconds_before: PositiveFloat = Field(
-        default=2.0,
-        description="Waveforms to extract before P phase arrival.",
+    noise_window: PositiveFloat = Field(
+        default=5.0,
+        ge=1.5,
+        description="Waveforms to extract before P phase arrival. The noise amplitude "
+        "is extracted from before the P phase arrival, with a one second padding.",
     )
     seconds_after: PositiveFloat = Field(
         default=4.0,
@@ -251,12 +257,19 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
         " The taper stabalizes the restitution and is cut off from the traces "
         "before the analysis.",
     )
+    min_signal_noise_ratio: float = Field(
+        default=1.5,
+        ge=1.0,
+        description="Minimum signal-to-noise ratio for the magnitude estimation. "
+        "The noise amplitude is extracted from before the P phase arrival,"
+        " with 0.5 s padding.",
+    )
 
     gf_store_dirs: list[DirectoryPath] = Field(
         default=[Path(".")],
         description="The directories of the Pyrocko GF stores.",
     )
-    processed_mseed_export: NewPath | None = Field(
+    export_mseed: Path | None = Field(
         default=None,
         description="Path to export the processed mseed traces to.",
     )
@@ -292,11 +305,12 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
 
     async def add_magnitude(
         self,
-        squirrel: Squirrel,
+        waveform_provider: WaveformProvider,
         event: EventDetection,
     ) -> None:
         moment_magnitude = MomentMagnitude()
         receivers = list(event.receivers)
+
         for store, definition in zip(self._stores, self.models, strict=True):
             store_receivers = definition.filter_receivers_by_nsl(receivers)
             if not store_receivers:
@@ -307,10 +321,10 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
                 store_receivers, event
             )
             if not store_receivers:
-                logger.info("No receivers in range for peak amplitude")
+                logger.warning("No receivers in range for peak amplitude store")
                 continue
             if not store.source_depth_range.inside(event.effective_depth):
-                logger.info(
+                logger.warning(
                     "Event depth %.1f outside of magnitude store range (%.1f - %.1f).",
                     event.effective_depth,
                     *store.source_depth_range,
@@ -318,40 +332,44 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
                 continue
 
             traces = await event.receivers.get_waveforms_restituted(
-                squirrel,
+                waveform_provider.get_squirrel(),
                 receivers=store_receivers,
                 quantity=store.quantity,
-                seconds_before=self.seconds_before,
+                seconds_before=self.noise_window,
                 seconds_after=self.seconds_after,
+                seconds_taper=self.taper_seconds,
+                channels=waveform_provider.channel_selector,
                 demean=True,
-                seconds_fade=self.taper_seconds,
-                cut_off_fade=False,
+                cut_off_taper=False,
                 filter_clipped=True,
             )
             if not traces:
                 continue
 
-            for tr in traces:
-                if store.frequency_range.min != 0.0:
+            if store.frequency_range.min != 0.0:
+                for tr in traces:
                     await asyncio.to_thread(
-                        tr.highpass,
+                        tr.bandpass,
                         4,
                         store.frequency_range.min,
+                        store.frequency_range.max,
                         demean=False,
                     )
-                await asyncio.to_thread(
-                    tr.lowpass,
-                    4,
-                    store.frequency_range.max,
-                    demean=False,
-                )
-                tr.chop(tr.tmin + self.taper_seconds, tr.tmax - self.taper_seconds)
+            else:
+                for tr in traces:
+                    await asyncio.to_thread(
+                        tr.lowpass, 4, store.frequency_range.max, demean=False
+                    )
 
-            if self.processed_mseed_export is not None:
-                logger.debug(
-                    "saving processed mseed traces to %s", self.processed_mseed_export
+            for tr in traces:
+                await asyncio.to_thread(
+                    tr.chop, tr.tmin + self.taper_seconds, tr.tmax - self.taper_seconds
                 )
-                io.save(traces, str(self.processed_mseed_export), append=True)
+
+            if self.export_mseed is not None:
+                file_name = self.export_mseed / f"{time_to_path(event.time)}.mseed"
+                logger.debug("saving restituted mseed traces to %s", file_name)
+                await asyncio.to_thread(io.save, traces, str(file_name))
 
             grouped_traces = []
             receivers = []
@@ -367,10 +385,10 @@ class MomentMagnitudeExtractor(EventMagnitudeCalculator):
                 receivers=receivers,
                 traces=grouped_traces,
                 peak_amplitude=definition.peak_amplitude,
+                min_snr=self.min_signal_noise_ratio,
             )
 
-        if not moment_magnitude.average:
-            logger.warning("No moment magnitude found for event %s", event.time)
-            return
+        if not moment_magnitude.magnitude:
+            logger.warning("No moment magnitude for event %s", event.time)
 
         event.add_magnitude(moment_magnitude)

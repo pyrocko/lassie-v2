@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 import numpy as np
@@ -10,34 +11,45 @@ from typing_extensions import Self
 from qseek.utils import NSL
 
 if TYPE_CHECKING:
-    from pyrocko.squirrel import Squirrel
-
     from qseek.models.detection import EventDetection, Receiver
     from qseek.models.station import Stations
     from qseek.octree import Octree
+    from qseek.waveforms.providers import WaveformProvider
 
 KM = 1e3
+
+PeakMeasurement = Literal["peak-to-peak", "max-amplitude"]
+
+
+class StationLocalMagnitude(NamedTuple):
+    station: NSL
+    magnitude: float
+    error: float
+    peak_amp: float
+    distance_epi: float
+    distance_hypo: float
+    snr: float = 0.0
 
 
 class EventMagnitude(BaseModel):
     magnitude: Literal["EventMagnitude"] = "EventMagnitude"
 
-    average: float = Field(
-        default=0.0,
-        description="Average local magnitude.",
+    average: float | None = Field(
+        default=math.nan,
+        description="The network's magnitude, as median of" " all station magnitudes.",
     )
-    median: float = Field(
-        default=0.0,
-        description="Average local magnitude.",
+    error: float | None = Field(
+        default=math.nan,
+        description="Average error of the magnitude from median absolute deviation.",
     )
-    error: float = Field(
-        default=0.0,
-        description="Average error of local magnitude.",
+    station_magnitudes: list[StationLocalMagnitude] = Field(
+        default=[],
+        description="The magnitudes calculated for each station.",
     )
 
     @classmethod
     def get_subclasses(cls) -> tuple[type[EventMagnitude], ...]:
-        """Get the subclasses of this class.
+        """Get all subclasses of this class.
 
         Returns:
             list[type]: The subclasses of this class.
@@ -47,6 +59,10 @@ class EventMagnitude(BaseModel):
     @property
     def name(self) -> str:
         return self.__class__.__name__
+
+    @property
+    def n_observations(self) -> int:
+        return len(self.station_magnitudes)
 
     def csv_row(self) -> dict[str, float]:
         return {
@@ -123,13 +139,13 @@ class EventMagnitudeCalculator(BaseModel):
 
     async def add_magnitude(
         self,
-        squirrel: Squirrel,
+        waveform_provider: WaveformProvider,
         event: EventDetection,
     ) -> None:
         """Adds a magnitude to the squirrel for the given event.
 
         Args:
-            squirrel (Squirrel): The squirrel object to add the magnitude to.
+            waveform_provider (WaveformProvider): The waveform provider.
             event (EventDetection): The event detection object.
 
         Raises:
@@ -158,14 +174,14 @@ class StationAmplitudes(NamedTuple):
     station_nsl: NSL
     peak: float
     noise: float
-    std_noise: float
+    noise_std: float
 
     distance_epi: float
     distance_hypo: float
 
     @property
-    def anr(self) -> float:
-        """Amplitude to noise ratio."""
+    def snr(self) -> float:
+        """Signal-to-noise ratio."""
         if self.noise == 0.0:
             return 0.0
         return self.peak / self.noise
@@ -176,24 +192,36 @@ class StationAmplitudes(NamedTuple):
         receiver: Receiver,
         traces: list[Trace],
         event: EventDetection,
-        noise_padding: float = 0.0,
+        noise_padding: float = 1.0,
+        measurement: PeakMeasurement = "max-amplitude",
     ) -> Self:
-        time_arrival = min(receiver.get_arrivals_time_window()).timestamp()
+        first_arrival = min(receiver.get_arrivals_time_window()).timestamp()
 
         noise_traces = [
-            tr.chop(tmin=tr.tmin, tmax=time_arrival - noise_padding, inplace=False)
+            tr.chop(tmin=tr.tmin, tmax=first_arrival - noise_padding, inplace=False)
+            for tr in traces
+        ]
+        signal_traces = [
+            tr.chop(tmin=first_arrival - noise_padding, tmax=tr.tmax, inplace=False)
             for tr in traces
         ]
 
-        peak_amp = max(np.abs(tr.ydata).max() for tr in traces)
-        noise_amp = max(np.abs(tr.ydata).max() for tr in noise_traces)
-        std_noise = max(np.std(tr.ydata) for tr in noise_traces)
+        if measurement == "peak-to-peak":
+            peak_amp = max(np.ptp(tr.ydata) / 2 for tr in signal_traces)
+            noise_amp = max(np.ptp(tr.ydata) / 2 for tr in noise_traces)
+        elif measurement == "max-amplitude":
+            peak_amp = max(np.max(np.abs(tr.ydata)) for tr in signal_traces)
+            noise_amp = max(np.max(np.abs(tr.ydata)) for tr in noise_traces)
+        else:
+            raise ValueError(f"Invalid peak measurement: {measurement}")
+
+        noise_std = max(np.std(tr.ydata) for tr in noise_traces)
 
         return cls(
             station_nsl=receiver.nsl,
             peak=peak_amp,
             noise=noise_amp,
-            std_noise=std_noise,
+            noise_std=noise_std,
             distance_hypo=receiver.distance_to(event),
             distance_epi=receiver.surface_distance_to(event),
         )

@@ -19,29 +19,86 @@ KM = 1000.0
 CONFIDENCE_QUALITY_BINS = [1.0, 0.8, 0.6, 0.4, 0.0]
 
 CONTROL_FILE_TPL = """velest parameters must be modified according to documentation
+* olat olon icoordsystem zshift itrial ztrial ised
 {ref_lat}   {ref_lon}      0            0.0      0     0.00      1
+* neqs nshot rotate
 {n_earthquakes}      0      0.0
+* isingle iresolcalc
 {isingle:1d}     0
-{max_distance_station}  0      {min_depth}    0.20    5.00    {use_station_correction:1d}
+* dmax itopo zmin veladj zadj lowveloclay
+{max_distance_station}  0      {min_depth}    0.20    5.00    {allow_low_velocity:1d}
+* nsp swtfac vpvs nmo
 2      0.75      {vp_vs_ratio}       1
+* othet xythet zthet vthet stathet
 0.01    0.01      0.01    {velocity_damping}     {station_correction_damping}
+* nsinv nshcor nshfix iuseelev iusestacorr
 1       0       0        {use_elevation:1d}        {use_station_correction:1d}
+* iturbo icnvout istaout ismpout
 1         1         2        0
+* irayout idrvout ialeout idspout irflout irfrout iresout
 0         0         0         0         0         0        0
+* delmin ittmax invertrati
 0.001   {iteration_number}   {invertratio}
+* Modelfile
 {model_file}
+* Stationfile
 stations_velest.sta
+* Seismofile
 
+* File with region names
 regionsnamen.dat
+* File with region coordinates
 regionskoord.dat
+* File #1 with Topo data
 
+* File #2 with topo data
 
+** Input files
+* File with earthquake data / catalog
 {phase_file}
+* File with shot data
 
+** Output files
+* Main print output file
 {mainout_file}
+* File with single event locations
 {outcheck_file}
+* File with final hypocenters in *.cnv format
 {finalcnv_file}
+* File with new station corrections
 {stacorrection_file}
+"""
+
+README = """# VELEST project folder
+
+
+This folder contains the VELEST project files.
+
+## Install VELEST
+
+Download the VELEST software from the https://github.com/Dal-mzhang/REAL/
+Compile VELEST from src/VELEST.
+
+Copy region files
+
+```
+cp REAL/demo_real/VELEST/region* .
+```
+
+## Run VELEST
+
+## Relocate Events
+
+```sh
+velest
+```
+
+## Invert velocity model
+
+To invert change the following parameters in `velest.cmn`:
+* `isingle` to 0 in
+* `ittmax` to 9
+* `invertratio` to 3
 """
 
 
@@ -49,11 +106,11 @@ class VelestControlFile(NamedTuple):
     ref_lat: float
     ref_lon: float  # should be negative for East
     n_earthquakes: int
-    isingle: bool = True
+    isingle: bool = False
     min_depth: float = -0.2
     vp_vs_ratio: float = 1.65
-    iteration_number: int = 99
-    invertratio: int = 0
+    iteration_number: int = 9
+    invertratio: int = 3
     model_file: str = "model.mod"
     phase_file: str = "phase_velest.pha"
     mainout_file: str = "main.out"
@@ -76,10 +133,10 @@ class Velest(Exporter):
 
     min_event_semblance: float = 0.2
     min_receivers_number: int = 10
+    min_distance_to_border: float = 500.0
     min_p_phase_confidence: float = 0.3
     min_s_phase_confidence: float = 0.3
     max_traveltime_delay: float = 2.5
-    distance_border: float = 500.0
     n_picks_p: int = 0
     n_picks_s: int = 0
     n_events: int = 0
@@ -95,8 +152,8 @@ class Velest(Exporter):
             default=self.min_receivers_number,
         )
         self.min_distance_to_border = FloatPrompt.ask(
-            "Minimum distance to border(m)",
-            default=self.distance_border,
+            "Minimum distance to border (meters)",
+            default=self.min_distance_to_border,
         )
         self.min_p_phase_confidence = FloatPrompt.ask(
             "Minimum pick probability for P phase",
@@ -195,6 +252,10 @@ class Velest(Exporter):
 
         export_info = outdir / "export_info.json"
         export_info.write_text(self.model_dump_json(indent=2))
+
+        Path(outdir / "README.md").write_text(README)
+        logger.info("Selected %d events for VELEST project", n_earthquakes)
+        logger.info("VELEST project folder exported to %s", outdir)
         return outdir
 
     def export_phases_slim(

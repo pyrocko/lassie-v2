@@ -21,6 +21,7 @@ from pydantic import (
     computed_field,
     field_validator,
 )
+from scipy import stats
 
 from qseek.corrections.corrections import StationCorrectionType
 from qseek.distance_weights import DistanceWeights
@@ -276,8 +277,8 @@ class Search(BaseModel):
         description="Sampling rate for the semblance image function. "
         "Choose from `10, 20, 25, 50, 100, 200 or 400` Hz.",
     )
-    detection_threshold: PositiveFloat = Field(
-        default=0.2,
+    detection_threshold: Literal["MAD"] | PositiveFloat = Field(
+        default="MAD",
         description="Detection threshold for semblance.",
     )
     pick_confidence_threshold: float = Field(
@@ -345,7 +346,10 @@ class Search(BaseModel):
         "`0` uses all available cores.",
     )
 
-    plot_octree_surface: bool = False
+    save_images: bool = Field(
+        default=False,
+        description="Save annotation images to disk for debugging and analysis.",
+    )
     created: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
     _progress: SearchProgress = PrivateAttr(SearchProgress())
@@ -596,9 +600,11 @@ class Search(BaseModel):
 
             detections, semblance_trace = await search_block.search()
 
-            self._catalog.save_semblance_trace(semblance_trace)
+            await self._catalog.save_semblance_trace(semblance_trace)
             if detections:
                 BackgroundTasks.create_task(self.new_detections(detections))
+            if self.save_images:
+                await images.save_mseed(self._rundir / "images")
 
             stats.add_processed_batch(
                 batch,
@@ -637,14 +643,6 @@ class Search(BaseModel):
         if not catalog.n_events:
             return
 
-        threshold = np.floor(np.log10(catalog.n_events)) - 1
-        new_threshold = max(10, 10**threshold)
-        if catalog.n_events - self._last_detection_export > new_threshold:
-            # await catalog.export_detections(
-            #     jitter_location=self.octree.smallest_node_size()
-            # )
-            self._last_detection_export = catalog.n_events
-
     async def add_magnitude_and_features(
         self,
         event: EventDetection,
@@ -660,21 +658,16 @@ class Search(BaseModel):
         if not event.in_bounds:
             return event
 
-        try:
-            squirrel = self.data_provider.get_squirrel()
-        except NotImplementedError:
-            return event
-
         async with self._compute_semaphore:
             for mag_calculator in self.magnitudes:
                 if not recalculate and mag_calculator.has_magnitude(event):
                     continue
                 logger.debug("adding magnitude from %s", mag_calculator.magnitude)
-                await mag_calculator.add_magnitude(squirrel, event)
+                await mag_calculator.add_magnitude(self.data_provider, event)
 
             for feature_calculator in self.features:
                 logger.debug("adding features from %s", feature_calculator.feature)
-                await feature_calculator.add_features(squirrel, event)
+                await feature_calculator.add_features(self.data_provider, event)
         return event
 
     @classmethod
@@ -907,10 +900,22 @@ class SearchTraces:
         leaf_node_mask = np.array([node.is_leaf() for node in octree.nodes], dtype=bool)
         semblance.set_leaf_nodes(leaf_node_mask)
 
-        threshold = parent.detection_threshold ** (1.0 / parent.power_mean)
+        if parent.detection_threshold == "MAD":
+            detection_threshold = stats.median_abs_deviation(
+                await semblance.maxima_semblance(
+                    trim_padding=False,
+                    nthreads=parent.n_threads_argmax,
+                )
+            )
+            detection_threshold *= 10.0
+            logger.debug("threshold MAD %g", detection_threshold)
+        else:
+            detection_threshold = parent.detection_threshold
+
+        threshold = detection_threshold ** (1.0 / parent.power_mean)
         detection_idx, detection_semblance = await semblance.find_peaks(
-            height=threshold,
-            prominence=threshold,
+            height=float(threshold),
+            prominence=float(threshold),
             distance=round(parent.detection_blinding.total_seconds() * sampling_rate),
             nthreads=parent.n_threads_argmax,
         )

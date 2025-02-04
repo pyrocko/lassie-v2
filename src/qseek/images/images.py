@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import chain
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -221,6 +222,17 @@ class WaveformImages:
         for img in self:
             traces += img.traces
         snuffle(traces)
+
+    async def save_mseed(self, path: Path) -> None:
+        """Save images to disk.
+
+        Args:
+            path (Path): Path to save the images.
+        """
+        logger.debug("saving images to %s", path)
+        path.mkdir(exist_ok=True)
+        for image in self:
+            await image.save_mseed(path)
 
     def __iter__(self) -> Iterator[WaveformImage]:
         yield from self.root
