@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from matplotlib.ticker import FuncFormatter
 from pydantic import Field, PositiveFloat, PrivateAttr, model_validator
 from pyrocko import io
 from typing_extensions import Self
@@ -72,14 +71,12 @@ class LocalMagnitude(EventMagnitude):
             logger.warning("No station magnitudes found for event %s", event.time)
             return self
 
-        median = np.median(self.magnitudes)
-        self.average = float(median)
-        self.error = float(np.median(np.abs(self.magnitudes - median)))  # MAD
-        return self
+        magnitudes = np.array([sta.magnitude for sta in self.station_magnitudes])
 
-    @property
-    def magnitudes(self) -> np.ndarray:
-        return np.array([sta.magnitude for sta in self.station_magnitudes])
+        median = np.median(magnitudes)
+        self.average = float(median)
+        self.error = float(np.median(np.abs(magnitudes - median)))  # MAD
+        return self
 
     @property
     def n_stations(self) -> int:
@@ -90,48 +87,6 @@ class LocalMagnitude(EventMagnitude):
             f"ML-{self.model}": self.average,
             f"ML-error-{self.model}": self.error,
         }
-
-    def plot(self) -> None:
-        import matplotlib.pyplot as plt
-
-        station_distances_hypo = np.array(
-            [sta.distance_hypo for sta in self.station_magnitudes]
-        )
-
-        fig = plt.figure()
-        ax = fig.gca()
-        ax.errorbar(
-            station_distances_hypo,
-            self.magnitudes,
-            yerr=[sta.error for sta in self.station_magnitudes],
-            marker="o",
-            mec="k",
-            mfc="k",
-            ms=2,
-            ecolor=(0.0, 0.0, 0.0, 0.1),
-            capsize=1,
-            ls="none",
-        )
-        ax.axhline(
-            self.average,
-            color="k",
-            linestyle="dotted",
-            alpha=0.5,
-            label=rf"Median $M_L$ {self.average:.2f} $\pm${self.error:.2f}",
-        )
-        ax.set_xlabel("Distance to Hypocenter [km]")
-        ax.set_ylabel("$M_L$")
-        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: x / KM))
-        ax.grid(alpha=0.3)
-        ax.legend(title=f"Estimator: {self.model}", loc="lower right")
-        ax.text(
-            0.05,
-            0.05,
-            f"{self.n_stations} Stations",
-            transform=ax.transAxes,
-            alpha=0.5,
-        )
-        plt.show()
 
 
 class LocalMagnitudeExtractor(EventMagnitudeCalculator):

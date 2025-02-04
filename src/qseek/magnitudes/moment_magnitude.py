@@ -232,7 +232,6 @@ class MomentMagnitude(EventMagnitude):
 
         magnitudes = np.array([sta.magnitude for sta in self.station_magnitudes])
         median = np.median(magnitudes)
-
         self.average = float(median)
         self.error = float(np.median(np.abs(magnitudes - median)))  # MAD
 
