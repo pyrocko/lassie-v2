@@ -288,11 +288,6 @@ class SeisBench(ImageFunction):
         # The 0.2 seconds is the default value from SeisBench training
         return 0.2 / self.rescale_input
 
-    def _detection_half_width(self) -> float:
-        """Half width of the detection window in seconds."""
-        # The 0.2 seconds is the default value from SeisBench training
-        return 0.2 / self.rescale_input
-
     @alog_call
     async def process_traces(self, traces: list[Trace]) -> list[PhaseNetImage]:
         stream = Stream(tr.to_obspy_trace() for tr in traces)

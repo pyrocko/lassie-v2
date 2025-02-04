@@ -76,10 +76,10 @@ class Velest(Exporter):
 
     min_event_semblance: float = 0.2
     min_receivers_number: int = 10
+    min_distance_to_border: float = 500.0
     min_p_phase_confidence: float = 0.3
     min_s_phase_confidence: float = 0.3
     max_traveltime_delay: float = 2.5
-    distance_border: float = 500.0
     n_picks_p: int = 0
     n_picks_s: int = 0
     n_events: int = 0
@@ -95,8 +95,8 @@ class Velest(Exporter):
             default=self.min_receivers_number,
         )
         self.min_distance_to_border = FloatPrompt.ask(
-            "Minimum distance to border(m)",
-            default=self.distance_border,
+            "Minimum distance to border (meters)",
+            default=self.min_distance_to_border,
         )
         self.min_p_phase_confidence = FloatPrompt.ask(
             "Minimum pick probability for P phase",

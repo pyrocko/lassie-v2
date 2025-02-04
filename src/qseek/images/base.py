@@ -28,11 +28,20 @@ class ObservedArrival:
 class ImageFunction(BaseModel):
     image: Literal["base"] = "base"
 
-    async def process_traces(self, traces: list[Trace]) -> list[WaveformImage]: ...
-
     @property
     def name(self) -> str:
         return self.__class__.__name__
+
+    async def process_traces(self, traces: list[Trace]) -> list[WaveformImage]:
+        """Process traces to generate image functions.
+
+        Args:
+            traces (list[Trace]): List of traces to process.
+
+        Returns:
+            list[WaveformImage]: List of image functions.
+        """
+        ...
 
     def get_blinding(self, sampling_rate: float) -> timedelta:
         """Blinding duration for the image function. Added to padded waveforms.
